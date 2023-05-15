@@ -1,0 +1,144 @@
+---
+title: "DATAEXPLORATION"
+format: html
+editor: visual
+---
+
+Lucian Lang : Data Exploration Assignment
+
+Nicolas Huntington Klein
+
+Start with setting the working directory and loading our data files.
+
+```{r}
+list.files(full.names = TRUE)
+```
+
+You can add options to executable code like this
+
+```{r}
+library(rio)
+list.files(pattern = "trends_up_to", full.names = TRUE)
+file.list=list.files(pattern = "trends_up_to", full.names = "TRUE")
+dat <- import_list(file.list, rbind = TRUE, fill = TRUE)
+```
+
+Changing the data to an actual usable Date.
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(fixest)
+library(ggplot2)
+library(stringr)
+
+dat <- dat %>% mutate(monthorweek = str_sub(monthorweek, 1, 10))
+
+dat <- dat%>% mutate(monthorweek = ymd(monthorweek))
+
+dat_month <- dat %>% mutate(monthorweek = floor_date(monthorweek, unit = "month"))
+```
+
+Changing the Variables types so it is ordered by school name and keyword. Then providing more options to view it by week, month, and year.
+
+```{r}
+standard_df <- dat %>%
+  group_by(schname, keyword) %>%
+  mutate(stan_index = (index - mean(index))/sd(index))
+
+# Deleting NA's
+
+noNAs <- na.omit(standard_df)
+```
+
+Week, Month, Year
+
+```{r}
+maindata <- noNAs %>% group_by(schname, monthorweek) %>%
+  summarise(new_index = mean(stan_index))
+```
+
+Bringing in the the Scorecard data.
+
+```{r}
+scorecard <- import('Most+Recent+Cohorts+(Scorecard+Elements).csv')
+
+# Making all LOWER case
+
+names(scorecard) <- tolower(names(scorecard))
+
+id_link <- import('id_name_link.csv')
+```
+
+Removing all the duplicate school names to make a unique list.
+
+```{r}
+id_link <- id_link %>% group_by(schname) %>%
+  mutate(n=n())
+
+filtered_id <- filter(id_link, n==1)
+```
+
+Finalizing and bringing it all together.
+
+```{r}
+id_trends <- inner_join(maindata, filtered_id, by = 'schname')
+final_piece <- inner_join(id_trends, scorecard, by = 'unitid')
+```
+
+Arranging the Data For Analysis
+
+Story: **Among colleges that predominantly grant bachelor's degrees**, did the release of the Scorecard shift student interest to high-earnings colleges relative to low-earnings ones (as proxied by Google searches for keywords associated with those colleges)?
+
+Adjusting with Median Earnings to help answer research question. Removing all the null values to help regression results.
+
+```{r}
+final_piece <- rename(final_piece, 'median_earnings' = 'md_earn_wne_p10-reported-earnings')
+
+mean(as.numeric(final_piece$median_earnings), na.rm = TRUE)
+```
+
+We are going to make our cutoff \$38,500 for Median Earnings for our analysis.
+
+Here is our analysis data creation. I am setting the data to only data related to 4 year Bachelors Degree Universities to properly answer research question. As well as creating different class levels for our new cutoff.
+
+```{r}
+analysis_final <- final_piece %>%
+  select(schname, monthorweek, new_index, unitid, n, median_earnings, preddeg, locale, grad_debt_mdn_supp) %>%
+  filter(preddeg == 3) %>%
+  mutate(high_class = median_earnings >= 40000, low_class = median_earnings <= 38000, median_class = median_earnings > 38000 & median_earnings < 40000) %>%
+  mutate(date_2015 = monthorweek > ymd('2015-09-12'))
+```
+
+First Visual
+
+```{r}
+analysis_final %>%
+  filter(!is.na(high_class) & !is.na(date_2015)) %>%
+  group_by(high_class, date_2015) %>%
+  summarize(new_index = mean(new_index, na.rm = TRUE)) %>%
+  ggplot(aes(x = high_class, y = new_index, fill = date_2015)) +
+  geom_bar(stat = 'identity', position = 'dodge') + 
+  labs(x = "Income Class", y = "Index Placement", title = 'Income Level Index Placement')
+```
+
+Using the new variables included to create regression that best supports the shift in student interest in our data.
+
+```{r}
+regression <- feols(new_index ~ high_class : date_2015 + low_class : date_2015 + monthorweek, vcov = 'hetero', data = analysis_final)
+
+etable(regression)
+```
+
+2.) Final Write Up
+
+The analysis conducted was performed under the research of finding out if there was a interest shift in college's after the Scorecard was released in the year of 2015. After review, we data cleaned by adjusting the file package provided. We combined the data trends by using the pattern function to bind them all together. We adjusted this combined data set by removing NA's in certain sections, developing a column to allow us to understand what data is from 2015. And lastly, by conducting a code, we were able to create unique values from colleges so we do not see repeats. After joining the scorecard and Google trends results, we combined by using 'unitid' and 'schname'. With this we now have a full data set with the grading system, new index results, and all the variables for a decision.
+
+Next, we slimmed this large data set by selecting variables and setting certain restrictions, on the new clean dataset. It holds variables we believe have an effect and time change from the release of the scorecard. We included 'locale', which allows us to see the locations that the colleges are from. We selected median earnings, and developed a high class and low class column to help our category's. We used the cutoff 38,500 too determine high class and low class, as we selected the mean of all the median earnings. Lastly, we selected preedeg as well, to ensure we are only using data from schools that fulfill 4 year bachelors degrees, as that is what the research question asks of us.
+
+With this data set, we want to see the index change over time with a bar graph. This graph shows the split between high class and low class. With the Blue representing TRUE, meaning that the data reflected is showing a change in index. For the Red, it represents FALSE, which is the reflecting the data that has a positive index score. We observe that the higher class, which is above \$38,500 has much more data after the time split. Meaning over time, their has been a change/variable impact from the scorecard data since being released.
+
+Next, our regression result is notifying us what correlation has had the strongest effect on the time change of data over time. We tried multiple tests, and see that the locale function has a solid track of reasoning. We looked for the reasoning behind this and it states by the scorecard descriptions. We see a strong correlation of change in the Locale "32" and "31" zones. Both of these are listed as "Towns", one being distant and the other being remote. This states that, since the scorecard release, we have seen a shift of interest in student research for universities offering 4 year bachelors degrees, within 5-25 miles of a urbanized area. To answer or question, we have seen a shift in student interest based off the regression results. After dividing the class incomes, we noticed over time a large shift in interest, and this mainly was described through the location of Universities, and the google keyword trends centralizing the information in this area.
+
+In all, we can conclude that from this information, a real shift of 'interest' was developed after the release of the college scorecard. This is proven with our regression results that we finalized. After developing the categories of high class and low class, we were able to see the change in time with regression and the scorecard release variables. With a Constant of 12.67, and R2 of .065. Although the connection is not the strongest, we know for every unit increase in our date (monthorweek), we see a decrease in index of .0008 units, which shows a shift in change since the score card release. Location is a proven factor from previous tests, but the median earnings has also disclosed that their is a small shift as well, representing the possibility of changes in admittance. In conclusion, we can confirm a shift of interest since the release of the College Scorecard, with the google trends data obtained.

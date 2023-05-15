@@ -1,0 +1,61 @@
+---
+title: "PotentialFinal"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+list.files(full.names = TRUE)
+```
+
+```{r}
+library(lubridate)
+library(rio)
+
+list.files(pattern = "trends_up_to", full.names = TRUE)
+file.list=list.files(pattern = "trends_up_to", full.names = "TRUE")
+
+dat <- import_list(file.list, rbind = TRUE, fill = TRUE)
+
+dat <- dat %>% 
+  mutate(date = ymd(str_sub(monthorweek, start = 1, end = 10))) %>%
+  mutate(monthorweek = floor_date(date, unit = 'month'))
+
+dat <- dat %>%
+  group_by(schname, keyword) %>%
+  mutate(index = (index - mean(index))/sd(index))
+
+scorecard <- import('Most+Recent+Cohorts+(Scorecard+Elements).csv')
+id_name_link <- import('id_name_link.csv')
+
+id_name_link <- id_name_link %>%
+  group_by(schname) %>%
+  mutate(n = n()) %>%
+  filter(n <= 1)
+
+scorecard <- scorecard %>%
+  rename(unitid = UNITID)
+
+dat <- id_name_link %>%
+  inner_join(dat, by = 'schname')
+
+dat <- scorecard %>%
+  inner_join(dat, by = 'unitid')
+
+```
+
+You can add options to executable code like this
+
+```{r}
+
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
